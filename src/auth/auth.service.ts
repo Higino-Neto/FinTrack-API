@@ -14,6 +14,13 @@ export class AuthService {
         private jwtService: JwtService
     ) { }
 
+    async hashMaker(password: string) {
+        const salt = randomBytes(8).toString('hex');
+        const hash = await scrypt(password, salt, HASH_LENGTH) as Buffer;
+        const saltAndHash = `${salt}.${hash.toString('hex')}`;
+
+        return saltAndHash;
+    }
     async signUp(name: string, email: string, password: string) {
         const existingUser = await this.prisma.user.findUnique({
             where: {
@@ -25,23 +32,22 @@ export class AuthService {
             throw new BadRequestException({ message: "Credentials in use" });
         }
 
-        const salt = randomBytes(8).toString('hex');
-        const hash = await scrypt(password, salt, HASH_LENGTH) as Buffer;
-        const saltAndHash = `${salt}.${hash.toString('hex')}`;
+        const hashAndSalt = await this.hashMaker(password);
 
         const user = {
             name,
             email,
-            password: saltAndHash,
+            password: hashAndSalt,
         };
 
         const createdUser = await this.prisma.user.create({
             data: user
         });
-        
+
         const { password: _, ...result } = createdUser;
         return result;
     }
+
 
     async signIn(email: string, password: string): Promise<{ access_token: string }> {
         const existingUser = await this.prisma.user.findUnique({
@@ -59,9 +65,9 @@ export class AuthService {
 
         const [salt, storedHash] = existingUser.password.split('.');
         const signInHash = (await scrypt(password, salt, HASH_LENGTH)) as Buffer;
-        
+
         if (storedHash !== signInHash.toString('hex')) {
-            throw new UnauthorizedException({ message: 'Invalid Credentials'});
+            throw new UnauthorizedException({ message: 'Invalid Credentials' });
         }
 
         return {
